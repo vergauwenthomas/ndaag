@@ -9,7 +9,6 @@ Created on Thu Sep 26 17:40:21 2024
 import sys
 import pandas as pd
 import yfinance as yf
-import pandas_ta as ta
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
 
@@ -50,7 +49,7 @@ class Stock(StockdAnalysis):
     
     def plot(self, period='3mo', value='Close', *kwargs):
         #Get data
-        history_df = _fetch_data(tickername=self.name, period=period, api=self._api)
+        history_df = self.get_data(period=period)
         #styling attrs    
         title=f'{self.name} at {value}'
         ylabel=self._currency

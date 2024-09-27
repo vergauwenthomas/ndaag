@@ -2,3 +2,4 @@
 .spyproject
 
 *.swp
+*__pycache__*

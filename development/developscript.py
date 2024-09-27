@@ -9,6 +9,7 @@ Created on Thu Sep 26 17:37:02 2024
 
 
 import pandas as pd
+import numpy as np
 import yfinance as yf
 import matplotlib.pyplot as plt
 import ndaag 
@@ -17,33 +18,29 @@ import ndaag
 
 zelf = ndaag.Stock('AAPL')
 
-zelf.get_rolling_average().plot()
-# ax = zelf.plot('1y')
-# zelf.get_rolling_average().plot(ax=ax)
-
-zelf.get_MACD_and_signal().plot()
-
-# period='3mo'
-
-# df = zelf.tick.history(period)    
+eventsdf = zelf.event_analysis()
 
 
-# import matplotlib.gridspec as gridspec
-# f = plt.figure()
-
-# gs = gridspec.GridSpec(2, 1, height_ratios=[4,1])
-              
-# ax1 = plt.subplot(gs[0])
-# ax2 = plt.subplot(gs[1], sharex=ax1)
+# eventsdf['buy-trigger'] = eventsdf[['MACD_buy_signal',
+#                                     'momentum_buy_trigger',
+#                                     'rsi_buy_trigger']].apply(np.all, axis='columns')
+# buy_triggers = eventsdf[eventsdf['buy-trigger']].index.to_list()
 
 
 
-# df['Close'].plot(ax=ax1)
-# df['Volume'].plot(ax=ax2)
 
 
+# print(buy_triggers)
+
+# ax=zelf.plot(period='1y')
+
+# (ymin, ymax) = ax.get_ylim()
+
+# ax.vlines(x=buy_triggers, ymin=ymin, ymax=ymax, colors='purple', ls='--', lw=2, label='vline_multiple - full height')
+# # for trig in buy_triggers:
+#     # plt.
+    
 # plt.show()
-# fig, axs = plt.subplots(2, 1, sharex=True, layout='constrained')
 
 
 
@@ -54,6 +51,55 @@ zelf.get_MACD_and_signal().plot()
 
 
 
+
+#%%
+
+# test = zelf.get_MACD_and_signal()
+
+
+
+
+
+#%%
+
+
+# history='1y'
+# rsi_smoothing='2d'
+# rsi_threshold = 40.
+# event='buy'
+
+
+
+
+# datadf = zelf.get_data(period=history)
+# signaldf = pd.DataFrame()
+# signaldf.index = datadf.index.copy()
+
+
+# macdf = zelf.get_MACD_and_signal(historysize=history)
+# if event =='buy':
+#     #buy conditions: mac larger than signal and mac just crossed signal?
+#     #cond1: macd greater then signal
+#     macdf['cond1'] = (macdf['MACD'] >= macdf['MACD_signal'])
+    
+#     #cond2: change of regime (lines are crossing)
+#     macdf['regime'] = macdf['cond1'] #True if macd over signal, false if macd under signal
+#     macdf['cond2'] =  (macdf['regime'] != macdf['regime'].shift())   
+    
+#     #regimechange from false to True
+   
+#     macdf['MACD-buy-signal'] = macdf['cond1'] & macdf['cond2']
+    
+
+#     signaldf = signaldf.merge(macdf[['MACD_buy_trigger']],
+#                               how='left',
+#                               left_index=True,
+#                               right_index=True)
+# else:
+#     sys.exit(f'{event} not implemented')
+
+
+# under 40 and increasing
 
 
 
