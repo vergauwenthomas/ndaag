@@ -13,12 +13,19 @@ import matplotlib.pyplot as plt
 
 import sys
 
+from ndaag.stock import Stock
 
-class StockdAnalysis:
+
+class StockdAnalysis():
+
+    def __init__(self, stock: Stock):
+        #General
+        self.stock = stock
+    
     
     def _plot_event_analysis(self, event, historysize, eventdf):
         #Get data
-        data = self.get_data(period=historysize)[[self.analysis_stockvalue, 'Volume']]
+        data = self.stock.fetch_data(period=historysize)[[self.analysis_stockvalue, 'Volume']]
         
         #Get Indices
         indices_df_list = []

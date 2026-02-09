@@ -1,0 +1,10 @@
+# Streamlit theme for the NDAAG dashboard.
+[theme]
+primaryColor = "#1f77b4"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#f5f7fa"
+textColor = "#333333"
+font = "sans serif"
+
+[server]
+headless = true
