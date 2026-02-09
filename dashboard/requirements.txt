@@ -7,6 +7,7 @@ pandas>=2.2.0
 yfinance>=0.2.43
 numpy>=1.26.0
 
+# Install ndaag package from the repository root
+# Streamlit Cloud clones the repo to /mount/src/ndaag
+-e /mount/src/ndaag
 
-# Install the ndaag package from the parent directory
--e ..
