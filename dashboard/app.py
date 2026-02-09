@@ -29,9 +29,9 @@ st.set_page_config(
     layout="wide",
 )
 
-st.title("📈 NDAAG — Stock Technical Analysis Dashboard")
+st.title("📈 NDAAG — Ons eigen dashboard")
 st.markdown(
-    "Interactive dashboard for **Momentum**, **MACD**, and **CCI** indicators."
+    "Welkom bij het NDAAG technische analyse dashboard! Dit dashboard kan inzicht geven in koop/verkoop signalen."
 )
 
 # ---------------------------------------------------------------------------
@@ -40,7 +40,7 @@ st.markdown(
 st.sidebar.header("⚙️ Settings")
 
 # --- Stock selection ---
-st.sidebar.subheader("Stock")
+st.sidebar.subheader("📊 Stock")
 ticker = st.sidebar.text_input("Ticker symbol", value="AAPL")
 period = st.sidebar.selectbox(
     "History period",
@@ -49,59 +49,66 @@ period = st.sidebar.selectbox(
     help="Amount of historical data to download.",
 )
 
-# --- Momentum settings ---
-st.sidebar.subheader("Momentum")
-mom_window = st.sidebar.number_input(
-    "Window (days)",
-    min_value=1,
-    max_value=60,
-    value=10,
-    step=1,
-    help="Look-back window in days for the momentum calculation.",
-)
-mom_threshold = st.sidebar.number_input(
-    "Signal threshold",
-    min_value=-50.0,
-    max_value=50.0,
-    value=0.0,
-    step=0.5,
-    help="Momentum must cross this threshold to trigger a signal.",
-)
+st.sidebar.divider()
 
-# --- MACD settings ---
-st.sidebar.subheader("MACD")
-col_macd1, col_macd2 = st.sidebar.columns(2)
-macd_fast = col_macd1.number_input("Fast EMA", min_value=2, max_value=50, value=12, step=1)
-macd_slow = col_macd2.number_input("Slow EMA", min_value=2, max_value=100, value=26, step=1)
-macd_signal = st.sidebar.number_input(
-    "Signal EMA", min_value=2, max_value=50, value=9, step=1
-)
-macd_early = st.sidebar.number_input(
-    "Early-warning threshold",
-    min_value=0.0,
-    max_value=5.0,
-    value=0.0,
-    step=0.1,
-    help="Set > 0 to receive buy/sell warnings *before* the actual crossover.",
-)
-
-# --- CCI settings ---
-st.sidebar.subheader("CCI")
-cci_period = st.sidebar.number_input(
-    "Period", min_value=5, max_value=100, value=20, step=1
-)
-col_cci1, col_cci2 = st.sidebar.columns(2)
-cci_buy_thresh = col_cci1.number_input(
-    "Buy threshold", min_value=-300, max_value=0, value=-100, step=10
-)
-cci_sell_thresh = col_cci2.number_input(
-    "Sell threshold", min_value=0, max_value=300, value=100, step=10
-)
-
-# --- Show signals toggle ---
-st.sidebar.subheader("Display")
+# --- Display options ---
+st.sidebar.subheader("🎨 Display")
 show_buy = st.sidebar.checkbox("Show buy signals", value=True)
 show_sell = st.sidebar.checkbox("Show sell signals", value=True)
+
+st.sidebar.divider()
+
+# --- Indicator settings (collapsible) ---
+with st.sidebar.expander("⚙️ Momentum Settings", expanded=False):
+    mom_window = st.number_input(
+        "Window (days)",
+        min_value=1,
+        max_value=60,
+        value=10,
+        step=1,
+        help="Look-back window in days for the momentum calculation.",
+        key="mom_window"
+    )
+    mom_threshold = st.number_input(
+        "Signal threshold",
+        min_value=-50.0,
+        max_value=50.0,
+        value=0.0,
+        step=0.5,
+        help="Momentum must cross this threshold to trigger a signal.",
+        key="mom_threshold"
+    )
+
+with st.sidebar.expander("⚙️ MACD Settings", expanded=False):
+    col_macd1, col_macd2 = st.columns(2)
+    macd_fast = col_macd1.number_input("Fast EMA", min_value=2, max_value=50, value=12, step=1, key="macd_fast")
+    macd_slow = col_macd2.number_input("Slow EMA", min_value=2, max_value=100, value=26, step=1, key="macd_slow")
+    macd_signal = st.number_input(
+        "Signal EMA", min_value=2, max_value=50, value=9, step=1, key="macd_signal"
+    )
+    macd_early = st.number_input(
+        "Early-warning threshold",
+        min_value=0.0,
+        max_value=5.0,
+        value=0.0,
+        step=0.1,
+        help="Set > 0 to receive buy/sell warnings *before* the actual crossover.",
+        key="macd_early"
+    )
+
+with st.sidebar.expander("⚙️ CCI Settings", expanded=False):
+    cci_period = st.number_input(
+        "Period", min_value=5, max_value=100, value=20, step=1, key="cci_period"
+    )
+    col_cci1, col_cci2 = st.columns(2)
+    cci_buy_thresh = col_cci1.number_input(
+        "Buy threshold", min_value=-300, max_value=0, value=-100, step=10, key="cci_buy"
+    )
+    cci_sell_thresh = col_cci2.number_input(
+        "Sell threshold", min_value=0, max_value=300, value=100, step=10, key="cci_sell"
+    )
+
+st.sidebar.divider()
 
 # --- Go button ---
 run_analysis = st.sidebar.button("🔄 Calculate", type="primary", use_container_width=True)
