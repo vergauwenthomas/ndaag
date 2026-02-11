@@ -21,6 +21,12 @@ A lightweight, interactive stock-analysis dashboard built with
 
 ---
 
+## Whatchlist
+
+The watchlist can be viewed here: https://docs.google.com/spreadsheets/d/1Ih-pPV-V4jtDRecsoEe5_tveb0LVNzxAVb1Gk4nfe0I/edit?usp=sharing
+
+For write perissions ask the owner.
+
 ## Run Locally
 
 ```bash

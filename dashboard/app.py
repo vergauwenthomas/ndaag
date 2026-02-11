@@ -17,7 +17,34 @@ import streamlit as st
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import pandas as pd
+import numpy as np
 import ndaag
+
+# ---------------------------------------------------------------------------
+#  Google Sheet — user profiles
+# ---------------------------------------------------------------------------
+SHEET_ID = "1Ih-pPV-V4jtDRecsoEe5_tveb0LVNzxAVb1Gk4nfe0I"
+SHEET_CSV_URL = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv"
+
+
+@st.cache_data(ttl=300, show_spinner="Loading user profiles …")
+def load_user_profiles() -> dict[str, list[str]]:
+    """Fetch the public Google Sheet and return {username: [tickers …]}."""
+    df = pd.read_csv(SHEET_CSV_URL, header=None)
+    profiles: dict[str, list[str]] = {}
+    for col in df.columns:
+        name = str(df.iloc[0, col]).strip()
+        tickers = (
+            df.iloc[1:, col]
+            .dropna()
+            .astype(str)
+            .str.strip()
+            .str.upper()
+            .tolist()
+        )
+        if name:
+            profiles[name] = tickers
+    return profiles
 
 
 # ---------------------------------------------------------------------------
@@ -39,13 +66,46 @@ st.markdown(
 # ---------------------------------------------------------------------------
 st.sidebar.header("⚙️ Settings")
 
+# --- User profile ---
+st.sidebar.subheader("👤 User Profile")
+try:
+    profiles = load_user_profiles()
+    user_names = list(profiles.keys())
+except Exception:
+    profiles = {}
+    user_names = []
+    st.sidebar.warning("Could not load user profiles from Google Sheet.")
+
+selected_user = st.sidebar.selectbox(
+    "Selecteer je naam",
+    options=["— geen —"] + user_names,
+    index=0,
+    help="Kies je naam om je persoonlijke watchlist te laden.",
+)
+
+st.sidebar.divider()
+
 # --- Stock selection ---
 st.sidebar.subheader("📊 Stock")
-ticker = st.sidebar.text_input("Ticker symbol", value="AAPL")
+
+if selected_user != "— geen —" and selected_user in profiles:
+    user_stocks = profiles[selected_user]
+    if user_stocks:
+        ticker = st.sidebar.selectbox(
+            "Kies een aandeel uit je watchlist",
+            options=user_stocks,
+            index=0,
+        )
+    else:
+        st.sidebar.info("Je watchlist is leeg. Voer handmatig een ticker in.")
+        ticker = st.sidebar.text_input("Kies een aandeel", value="AAPL")
+else:
+    ticker = st.sidebar.text_input("Kies een aandeel", value="AAPL")
+
 period = st.sidebar.selectbox(
     "History period",
     options=["3mo", "6mo", "9mo", "1y", "2y", "5y"],
-    index=2,
+    index=0,
     help="Amount of historical data to download.",
 )
 
@@ -107,6 +167,30 @@ with st.sidebar.expander("⚙️ CCI Settings", expanded=False):
     cci_sell_thresh = col_cci2.number_input(
         "Sell threshold", min_value=0, max_value=300, value=100, step=10, key="cci_sell"
     )
+
+st.sidebar.divider()
+
+# --- Composite score settings ---
+with st.sidebar.expander("📊 Composite Score Settings", expanded=False):
+    show_score = st.checkbox(
+        "Show composite buy/sell score",
+        value=False,
+        help="Overlay a weighted buy/sell score (0–100 %) on the price chart.",
+        key="show_score",
+    )
+    score_window = st.number_input(
+        "Rolling window (days)",
+        min_value=1,
+        max_value=7,
+        value=3,
+        step=1,
+        help="Backward-looking window over which signals are aggregated.",
+        key="score_window",
+    )
+    st.markdown("**Indicator weights** (will be normalised to 1)")
+    w_mom = st.slider("Momentum", 0.0, 1.0, 0.2, 0.01, key="w_mom")
+    w_macd = st.slider("MACD", 0.0, 1.0, 0.6, 0.01, key="w_macd")
+    w_cci = st.slider("CCI", 0.0, 1.0, 0.2, 0.01, key="w_cci")
 
 st.sidebar.divider()
 
@@ -198,34 +282,108 @@ def run_indicators(
 
 
 # ---------------------------------------------------------------------------
+#  Composite buy / sell score
+# ---------------------------------------------------------------------------
+def compute_composite_scores(
+    data: pd.DataFrame,
+    ind: dict,
+    window: int,
+    w_mom: float,
+    w_macd: float,
+    w_cci: float,
+) -> tuple[pd.Series, pd.Series]:
+    """
+    Compute a composite buy and sell score (0–100 %) over time.
+
+    For each indicator a binary series is created (1 on signal dates, 0
+    elsewhere).  A backward-looking rolling window counts how many signals
+    fell inside the window, then divides by the window size to obtain a
+    density (0–1).  The three densities are combined with user-supplied
+    weights that are normalised to sum to 1.
+
+    Returns
+    -------
+    buy_score, sell_score : pd.Series
+        Values in [0, 100].
+    """
+    idx = data.index
+
+    def _binary(signal_idx: pd.DatetimeIndex) -> pd.Series:
+        s = pd.Series(0.0, index=idx)
+        overlap = signal_idx.intersection(idx)
+        if len(overlap):
+            s.loc[overlap] = 1.0
+        return s
+
+    # Binary signal series
+    buy_series = {
+        "mom": _binary(ind["mom_buy"]),
+        "macd": _binary(ind["macd_buy"]),
+        "cci": _binary(ind["cci_buy"]),
+    }
+    sell_series = {
+        "mom": _binary(ind["mom_sell"]),
+        "macd": _binary(ind["macd_sell"]),
+        "cci": _binary(ind["cci_sell"]),
+    }
+
+    # Normalise weights
+    total_w = w_mom + w_macd + w_cci
+    if total_w == 0:
+        total_w = 1.0  # avoid division by zero
+    weights = {
+        "mom": w_mom / total_w,
+        "macd": w_macd / total_w,
+        "cci": w_cci / total_w,
+    }
+
+    def _score(series_dict: dict[str, pd.Series]) -> pd.Series:
+        score = pd.Series(0.0, index=idx)
+        for key, s in series_dict.items():
+            density = s.rolling(window, min_periods=1).mean()
+            score += weights[key] * density
+        return score * 100.0  # convert to %
+
+    return _score(buy_series), _score(sell_series)
+
+
+# ---------------------------------------------------------------------------
 #  Build Plotly figure
 # ---------------------------------------------------------------------------
 def build_figure(data: pd.DataFrame, ind: dict, ticker: str,
                  show_buy: bool, show_sell: bool,
-                 cci_buy_thresh: float, cci_sell_thresh: float) -> go.Figure:
+                 cci_buy_thresh: float, cci_sell_thresh: float,
+                 buy_score: pd.Series | None = None,
+                 sell_score: pd.Series | None = None) -> go.Figure:
     """
     Create a multi-panel Plotly figure replicating the developscript dashboard.
 
     Panels (top → bottom):
         1. Stock closing price  (with buy markers)
         2. Volume histogram
-        3. CCI
-        4. Momentum
-        5. MACD  (line, signal, histogram)
+        3. MACD  (line, signal, histogram)
+        4. CCI (Commodity Channel Index)
+        5. Momentum
+
     """
+    # When scores are shown, use a secondary y-axis on the price panel
+    has_scores = buy_score is not None and sell_score is not None
+    specs = [[{"secondary_y": True}]] + [[{"secondary_y": False}]] * 4
+
     fig = make_subplots(
         rows=5,
         cols=1,
         shared_xaxes=True,
         vertical_spacing=0.02,
-        row_heights=[0.30, 0.08, 0.20, 0.20, 0.22],
+        row_heights=[0.30, 0.08, 0.30, 0.16, 0.16],
         subplot_titles=[
             f"{ticker} — Close Price",
             "Volume",
+            "MACD",
             "CCI (Commodity Channel Index)",
             "Momentum",
-            "MACD",
         ],
+        specs=specs,
     )
 
     # ---- 1. Price --------------------------------------------------------
@@ -277,6 +435,31 @@ def build_figure(data: pd.DataFrame, ind: dict, ticker: str,
                     row=1, col=1,
                 )
 
+    # ---- Score overlay on price panel ------------------------------------
+    if has_scores:
+        fig.add_trace(
+            go.Scatter(
+                x=buy_score.index, y=buy_score.values,
+                mode="lines", name="Buy Score (%)",
+                line=dict(color="green", width=2, dash="dot"),
+                opacity=0.8,
+            ),
+            row=1, col=1, secondary_y=True,
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=sell_score.index, y=sell_score.values,
+                mode="lines", name="Sell Score (%)",
+                line=dict(color="red", width=2, dash="dot"),
+                opacity=0.8,
+            ),
+            row=1, col=1, secondary_y=True,
+        )
+        fig.update_yaxes(
+            title_text="Score (%)", secondary_y=True, row=1, col=1,
+            range=[0, 100], showgrid=False,
+        )
+
     # ---- 2. Volume -------------------------------------------------------
     fig.add_trace(
         go.Bar(
@@ -287,46 +470,8 @@ def build_figure(data: pd.DataFrame, ind: dict, ticker: str,
         ),
         row=2, col=1,
     )
-
-    # ---- 3. CCI ----------------------------------------------------------
-    cci = ind["cci_values"].dropna()
-    fig.add_trace(
-        go.Scatter(
-            x=cci.index, y=cci.values,
-            mode="lines", name="CCI",
-            line=dict(color="royalblue", width=1.5),
-        ),
-        row=3, col=1,
-    )
-    # Overbought / oversold reference lines
-    fig.add_hline(y=cci_sell_thresh, line_dash="dash", line_color="red",
-                  annotation_text=f"+{cci_sell_thresh}", row=3, col=1)
-    fig.add_hline(y=cci_buy_thresh, line_dash="dash", line_color="green",
-                  annotation_text=str(cci_buy_thresh), row=3, col=1)
-    fig.add_hline(y=0, line_dash="solid", line_color="black", opacity=0.3,
-                  row=3, col=1)
-
-    # Buy/sell vertical lines on indicator panels
-    _add_signal_vlines(fig, ind["cci_buy"], ind["cci_sell"],
-                       show_buy, show_sell, row=3)
-
-    # ---- 4. Momentum -----------------------------------------------------
-    mom = ind["mom_values"].dropna()
-    fig.add_trace(
-        go.Scatter(
-            x=mom.index, y=mom.values,
-            mode="lines", name="Momentum",
-            line=dict(color="purple", width=1.5),
-        ),
-        row=4, col=1,
-    )
-    fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5,
-                  row=4, col=1)
-
-    _add_signal_vlines(fig, ind["mom_buy"], ind["mom_sell"],
-                       show_buy, show_sell, row=4)
-
-    # ---- 5. MACD ---------------------------------------------------------
+    
+     # ---- 3. MACD ---------------------------------------------------------
     macd_line = ind["macd_line"].dropna()
     signal_line = ind["signal_line"].dropna()
     histogram = ind["histogram"].dropna()
@@ -337,7 +482,7 @@ def build_figure(data: pd.DataFrame, ind: dict, ticker: str,
             mode="lines", name="MACD Line",
             line=dict(color="blue", width=1.5),
         ),
-        row=5, col=1,
+        row=3, col=1,
     )
     fig.add_trace(
         go.Scatter(
@@ -345,7 +490,7 @@ def build_figure(data: pd.DataFrame, ind: dict, ticker: str,
             mode="lines", name="Signal Line",
             line=dict(color="red", width=1.5),
         ),
-        row=5, col=1,
+        row=3, col=1,
     )
     # Histogram bars coloured by sign
     hist_colors = ["green" if v >= 0 else "red" for v in histogram.values]
@@ -355,13 +500,53 @@ def build_figure(data: pd.DataFrame, ind: dict, ticker: str,
             name="Histogram",
             marker_color=hist_colors, opacity=0.35,
         ),
+        row=3, col=1,
+    )
+    fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5,
+                  row=3, col=1)
+
+    _add_signal_vlines(fig, ind["macd_buy"], ind["macd_sell"],
+                       show_buy, show_sell, row=3)
+
+    # ---- 4. CCI ----------------------------------------------------------
+    cci = ind["cci_values"].dropna()
+    fig.add_trace(
+        go.Scatter(
+            x=cci.index, y=cci.values,
+            mode="lines", name="CCI",
+            line=dict(color="royalblue", width=1.5),
+        ),
+        row=4, col=1,
+    )
+    # Overbought / oversold reference lines
+    fig.add_hline(y=cci_sell_thresh, line_dash="dash", line_color="red",
+                  annotation_text=f"+{cci_sell_thresh}", row=4, col=1)
+    fig.add_hline(y=cci_buy_thresh, line_dash="dash", line_color="green",
+                  annotation_text=str(cci_buy_thresh), row=4, col=1)
+    fig.add_hline(y=0, line_dash="solid", line_color="black", opacity=0.3,
+                  row=4, col=1)
+
+    # Buy/sell vertical lines on indicator panels
+    _add_signal_vlines(fig, ind["cci_buy"], ind["cci_sell"],
+                       show_buy, show_sell, row=4)
+
+    # ---- 5. Momentum -----------------------------------------------------
+    mom = ind["mom_values"].dropna()
+    fig.add_trace(
+        go.Scatter(
+            x=mom.index, y=mom.values,
+            mode="lines", name="Momentum",
+            line=dict(color="purple", width=1.5),
+        ),
         row=5, col=1,
     )
     fig.add_hline(y=0, line_dash="dash", line_color="black", opacity=0.5,
                   row=5, col=1)
 
-    _add_signal_vlines(fig, ind["macd_buy"], ind["macd_sell"],
+    _add_signal_vlines(fig, ind["mom_buy"], ind["mom_sell"],
                        show_buy, show_sell, row=5)
+
+   
 
     # ---- Layout tweaks ---------------------------------------------------
     fig.update_layout(
@@ -380,9 +565,9 @@ def build_figure(data: pd.DataFrame, ind: dict, ticker: str,
     )
     fig.update_yaxes(title_text="Price", row=1, col=1)
     fig.update_yaxes(title_text="Vol", row=2, col=1)
-    fig.update_yaxes(title_text="CCI", row=3, col=1)
-    fig.update_yaxes(title_text="Mom", row=4, col=1)
-    fig.update_yaxes(title_text="MACD", row=5, col=1)
+    fig.update_yaxes(title_text="MACD", row=3, col=1)
+    fig.update_yaxes(title_text="CCI", row=4, col=1)
+    fig.update_yaxes(title_text="Momentum", row=5, col=1)
     fig.update_xaxes(title_text="Date", row=5, col=1)
 
     return fig
@@ -472,12 +657,25 @@ if st.session_state["data"] is not None:
     col3.metric("MACD Buy / Sell", f"{len(ind['macd_buy'])} / {len(ind['macd_sell'])}")
     col4.metric("CCI Buy / Sell", f"{len(ind['cci_buy'])} / {len(ind['cci_sell'])}")
 
+    # ---- Composite scores ----
+    buy_score, sell_score = None, None
+    if show_score:
+        buy_score, sell_score = compute_composite_scores(
+            data, ind,
+            window=score_window,
+            w_mom=w_mom,
+            w_macd=w_macd,
+            w_cci=w_cci,
+        )
+
     # ---- Chart ----
     fig = build_figure(
         data, ind, used_ticker,
         show_buy=show_buy, show_sell=show_sell,
         cci_buy_thresh=cci_buy_thresh,
         cci_sell_thresh=cci_sell_thresh,
+        buy_score=buy_score,
+        sell_score=sell_score,
     )
     st.plotly_chart(fig, use_container_width=True)
 
